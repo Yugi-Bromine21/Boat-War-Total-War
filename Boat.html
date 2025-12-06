@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Boat War: Total War</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #1a4b6e;
+            font-family: 'Courier New', Courier, monospace;
+            color: #ecf0f1;
+        }
+
+        /* --- UI OVERLAYS --- */
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 15px;
+            border-radius: 8px;
+            pointer-events: none;
+            display: none;
+            min-width: 200px;
+        }
+
+        .overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: white;
+            text-shadow: 2px 2px 4px black;
+            background: rgba(0, 0, 0, 0.85);
+            padding: 40px;
+            border-radius: 10px;
+            border: 2px solid #e74c3c;
+            min-width: 400px;
+        }
+
+        #startScreen {
+            display: block;
+        }
+
+        #gameover {
+            display: none;
+        }
+
+        h1 {
+            font-size: 48px;
+            margin: 0 0 10px 0;
+            color: #f1c40f;
+        }
+
+        h2 {
+            font-size: 24px;
+            margin-bottom: 20px;
+        }
+
+        .btn-group {
+            margin: 20px 0;
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .btn {
+            background: #34495e;
+            border: 2px solid #7f8c8d;
+            color: white;
+            padding: 10px 20px;
+            font-family: inherit;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+            width: 100px;
+        }
+
+        .btn:hover {
+            background: #2c3e50;
+            border-color: #f1c40f;
+        }
+
+        .btn.active[data-mode="EASY"] {
+            background: #2ecc71;
+            color: #2c3e50;
+            border-color: #27ae60;
+            font-weight: bold;
+        }
+
+        .btn.active[data-mode="MEDIUM"] {
+            background: #f1c40f;
+            color: #2c3e50;
+            border-color: #f39c12;
+            font-weight: bold;
+        }
+
+        .btn.active[data-mode="EXTREME"] {
+            background: #e74c3c;
+            color: white;
+            border-color: #c0392b;
+            font-weight: bold;
+            box-shadow: 0 0 15px #e74c3c;
+        }
+
+        .blink {
+            animation: blinker 1.5s linear infinite;
+        }
+
+        @keyframes blinker {
+            50% {
+                opacity: 0;
+            }
+        }
+
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="ui">
+        <div style="color:#f1c40f; font-size: 20px; font-weight:bold;" id="scoreUi">Score: 0</div>
+        <div id="modeUi" style="font-size: 12px; color:#bdc3c7; margin-bottom: 5px;">DIFFICULTY: MEDIUM</div>
+        <div id="waveInfo" style="font-size: 16px; margin-top:5px;">Wave: 1</div>
+        <div id="telemetry" style="font-size: 14px; color:#bdc3c7; margin: 5px 0;">Radar Active</div>
+        <div id="health" style="color: #2ecc71; font-weight: bold;">Hull: 100%</div>
+    </div>
+
+    <div id="startScreen" class="overlay">
+        <h1>NAVAL COMMAND</h1>
+        <h2 id="highScoreDisplay">High Score: 0</h2>
+        <div class="btn-group">
+            <button class="btn" onclick="setDifficulty('EASY')" id="btnEasy" data-mode="EASY">EASY</button>
+            <button class="btn active" onclick="setDifficulty('MEDIUM')" id="btnMed" data-mode="MEDIUM">MEDIUM</button>
+            <button class="btn" onclick="setDifficulty('EXTREME')" id="btnExt" data-mode="EXTREME">EXTREME</button>
+        </div>
+        <div id="diffDescription" style="font-size: 14px; color: #bdc3c7; margin-bottom: 20px; min-height: 40px;">
+            Standard Deployment. Balanced forces.
+        </div>
+        <p>WASD to Drive | SPACE to Fire</p>
+        <p class="blink" style="font-size: 24px; color: #2ecc71; margin-top: 20px;">PRESS SPACE TO DEPLOY</p>
+    </div>
+
+    <div id="gameover" class="overlay">
+        <h1 style="color: #e74c3c;">MIA</h1>
+        <h2 id="finalScoreDisplay">Final Score: 0</h2>
+        <p class="blink" style="font-size: 24px; margin-top: 20px;">PRESS R TO RESTART</p>
+    </div>
+
+    <canvas id="simCanvas"></canvas>
+
+    <script>
+        // --- SETUP ---
+        const canvas = document.getElementById('simCanvas');
+        const ctx = canvas.getContext('2d');
+
+        const ui = document.getElementById('ui');
+        const scoreUi = document.getElementById('scoreUi');
+        const modeUi = document.getElementById('modeUi');
+        const waveUi = document.getElementById('waveInfo');
+        const telemetry = document.getElementById('telemetry');
+        const hpUi = document.getElementById('health');
+        const startScreen = document.getElementById('startScreen');
+        const gameOverScreen = document.getElementById('gameover');
+        const highScoreDisplay = document.getElementById('highScoreDisplay');
+        const finalScoreDisplay = document.getElementById('finalScoreDisplay');
+        const diffDesc = document.getElementById('diffDescription');
+
+        let highScore = localStorage.getItem('boatWarHighScore') || 0;
+        highScoreDisplay.innerText = `High Score: ${highScore}`;
+
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // --- DIFFICULTY CONFIG ---
+        const DIFFICULTY = {
+            EASY: {
+                id: 'EASY',
+                name: "CADET MODE",
+                desc: "High Reinforcements. +3 Allies per wave.",
+                enemyBase: 2, enemyGrowth: 1,
+                allyBase: 3, allyGrowth: 3
+            },
+            MEDIUM: {
+                id: 'MEDIUM',
+                name: "CAPTAIN MODE",
+                desc: "Balanced Conflict. +2 Allies per wave.",
+                enemyBase: 3, enemyGrowth: 2,
+                allyBase: 2, allyGrowth: 2
+            },
+            EXTREME: {
+                id: 'EXTREME',
+                name: "ADMIRAL MODE",
+                desc: "Overwhelming Hostiles. +1 Ally per wave.",
+                enemyBase: 5, enemyGrowth: 5,
+                allyBase: 1, allyGrowth: 1
+            }
+        };
+
+        let currentDiff = DIFFICULTY.MEDIUM;
+
+        function setDifficulty(mode) {
+            currentDiff = DIFFICULTY[mode];
+            ['btnEasy', 'btnMed', 'btnExt'].forEach(id => document.getElementById(id).classList.remove('active'));
+            if (mode === 'EASY') document.getElementById('btnEasy').classList.add('active');
+            if (mode === 'MEDIUM') document.getElementById('btnMed').classList.add('active');
+            if (mode === 'EXTREME') document.getElementById('btnExt').classList.add('active');
+            diffDesc.innerText = currentDiff.desc;
+        }
+
+        // --- INPUT ---
+        const keys = { ArrowUp: false, w: false, ArrowDown: false, s: false, ArrowLeft: false, a: false, ArrowRight: false, d: false, " ": false };
+        window.addEventListener('keydown', (e) => {
+            keys[e.key] = true;
+            if (gameState === 'MENU' && e.key === ' ') startGame();
+            if (gameState === 'GAMEOVER' && e.key.toLowerCase() === 'r') startGame();
+        });
+        window.addEventListener('keyup', (e) => keys[e.key] = false);
+
+        // --- MATH UTILS ---
+        const Vec2 = {
+            add: (v1, v2) => ({ x: v1.x + v2.x, y: v1.y + v2.y }),
+            sub: (v1, v2) => ({ x: v1.x - v2.x, y: v1.y - v2.y }),
+            scale: (v, s) => ({ x: v.x * s, y: v.y * s }),
+            dot: (v1, v2) => v1.x * v2.x + v1.y * v2.y,
+            mag: (v) => Math.sqrt(v.x * v.x + v.y * v.y),
+            dist: (v1, v2) => Math.sqrt(Math.pow(v1.x - v2.x, 2) + Math.pow(v1.y - v2.y, 2)),
+            normalize: (v) => {
+                const m = Math.sqrt(v.x * v.x + v.y * v.y);
+                return m === 0 ? { x: 0, y: 0 } : { x: v.x / m, y: v.y / m };
+            },
+            angleDiff: (a1, a2) => {
+                let diff = a2 - a1;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                while (diff > Math.PI) diff -= Math.PI * 2;
+                return diff;
+            }
+        };
+
+        // --- CLASSES ---
+        class HealthStation {
+            constructor(x, y) { this.pos = { x: x, y: y }; this.radius = 25; }
+            draw() {
+                ctx.save(); ctx.translate(this.pos.x, this.pos.y);
+                const pulse = 1 + Math.sin(Date.now() * 0.005) * 0.1;
+                ctx.scale(pulse, pulse);
+                ctx.beginPath(); ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = "rgba(46, 204, 113, 0.3)"; ctx.fill();
+                ctx.fillStyle = "#2ecc71";
+                ctx.fillRect(-8, -20, 16, 40); ctx.fillRect(-20, -8, 40, 16);
+                ctx.restore();
+            }
+        }
+
+        class Bullet {
+            constructor(x, y, angle, boatVel, team) {
+                this.pos = { x: x, y: y }; this.team = team;
+                const muzzleVel = 18;
+                this.vel = { x: Math.cos(angle) * muzzleVel + boatVel.x * 0.5, y: Math.sin(angle) * muzzleVel + boatVel.y * 0.5 };
+                this.life = 80; this.radius = 3;
+            }
+            update() { this.pos = Vec2.add(this.pos, this.vel); this.life--; }
+            draw() {
+                ctx.beginPath(); ctx.arc(this.pos.x, this.pos.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = this.team === 'blue' ? "#f1c40f" : "#e74c3c"; ctx.fill();
+            }
+        }
+
+        class Rock {
+            constructor(x, y, baseRadius) {
+                this.pos = { x: x, y: y }; this.radius = baseRadius;
+                this.vertices = []; this.generateShape();
+            }
+            generateShape() {
+                this.vertices = []; const resolution = 15;
+                const layers = [{ offset: Math.random() * 10, freq: 2 + Math.random() * 2, amp: this.radius * 0.25 }];
+                for (let i = 0; i < resolution; i++) {
+                    const theta = (i / resolution) * Math.PI * 2;
+                    let r = this.radius;
+                    for (let layer of layers) r += Math.sin(theta * layer.freq + layer.offset) * layer.amp;
+                    this.vertices.push({ x: Math.cos(theta) * r, y: Math.sin(theta) * r });
+                }
+            }
+            takeDamage() {
+                this.radius -= 10;
+                if (this.radius < 15) return true;
+                this.generateShape(); return false;
+            }
+            draw() {
+                ctx.save(); ctx.translate(this.pos.x, this.pos.y);
+                ctx.beginPath(); ctx.moveTo(this.vertices[0].x, this.vertices[0].y);
+                for (let i = 1; i < this.vertices.length; i++) ctx.lineTo(this.vertices[i].x, this.vertices[i].y);
+                ctx.closePath();
+                ctx.fillStyle = "#34495e"; ctx.fill(); ctx.strokeStyle = "#2c3e50"; ctx.stroke();
+                ctx.restore();
+            }
+        }
+
+        class Ship {
+            constructor(x, y, team) {
+                this.pos = { x: x, y: y }; this.vel = { x: 0, y: 0 };
+                this.angle = -Math.PI / 2; this.team = team;
+                this.hp = 10; this.maxHp = 10;
+                this.radius = 15; this.power = 0.25; this.turnSpeed = 0.05;
+                this.speed = 0; this.waterDrag = 0.98; this.lateralDrag = 0.90;
+                this.cooldown = 0; this.fireRate = 15;
+            }
+            applyPhysics(throttle, turnDir, rocks) {
+                if (turnDir !== 0) this.angle += turnDir * this.turnSpeed;
+                const force = { x: Math.cos(this.angle) * throttle * this.power, y: Math.sin(this.angle) * throttle * this.power };
+                this.vel = Vec2.add(this.vel, force);
+                const fwdNormal = { x: Math.cos(this.angle), y: Math.sin(this.angle) };
+                const rightNormal = { x: Math.cos(this.angle + Math.PI / 2), y: Math.sin(this.angle + Math.PI / 2) };
+                const fwdSpeed = Vec2.dot(this.vel, fwdNormal);
+                const rightSpeed = Vec2.dot(this.vel, rightNormal);
+                this.vel = Vec2.add(Vec2.scale(fwdNormal, fwdSpeed * this.waterDrag), Vec2.scale(rightNormal, rightSpeed * this.lateralDrag));
+                this.pos = Vec2.add(this.pos, this.vel);
+                this.speed = Vec2.mag(this.vel);
+                if (this.speed > 0.5) wakeParticles.push({ x: this.pos.x, y: this.pos.y, angle: this.angle, life: 1.0, decay: 0.015 });
+                if (this.pos.x > canvas.width) this.pos.x = 0; if (this.pos.x < 0) this.pos.x = canvas.width;
+                if (this.pos.y > canvas.height) this.pos.y = 0; if (this.pos.y < 0) this.pos.y = canvas.height;
+                for (let rock of rocks) {
+                    let distVec = Vec2.sub(this.pos, rock.pos);
+                    let distMag = Vec2.mag(distVec);
+                    if (distMag < this.radius + rock.radius) {
+                        let normal = Vec2.normalize(distVec);
+                        let overlap = (this.radius + rock.radius) - distMag;
+                        this.pos = Vec2.add(this.pos, Vec2.scale(normal, overlap));
+                        let dotProd = Vec2.dot(this.vel, normal);
+                        this.vel = Vec2.sub(this.vel, Vec2.scale(normal, 2 * dotProd));
+                        this.vel = Vec2.scale(this.vel, 0.5);
+                    }
+                }
+                if (this.cooldown > 0) this.cooldown--;
+            }
+            fire(bulletsList) {
+                if (this.cooldown <= 0) {
+                    this.cooldown = this.fireRate;
+                    const gunTip = { x: this.pos.x + Math.cos(this.angle) * 20, y: this.pos.y + Math.sin(this.angle) * 20 };
+                    bulletsList.push(new Bullet(gunTip.x, gunTip.y, this.angle, this.vel, this.team));
+                    this.vel = Vec2.sub(this.vel, Vec2.scale({ x: Math.cos(this.angle), y: Math.sin(this.angle) }, 0.5));
+                }
+            }
+            draw() {
+                ctx.save(); ctx.translate(this.pos.x, this.pos.y); ctx.rotate(this.angle);
+                ctx.beginPath(); ctx.moveTo(15, 0); ctx.lineTo(-12, 12); ctx.lineTo(-8, 0); ctx.lineTo(-12, -12); ctx.closePath();
+                if (this instanceof Player) ctx.fillStyle = '#3498db';
+                else if (this.team === 'blue') ctx.fillStyle = '#2ecc71';
+                else ctx.fillStyle = '#e74c3c';
+                ctx.fill();
+                ctx.fillStyle = this.hp < this.maxHp * 0.4 ? 'red' : '#fff';
+                ctx.fillRect(-10, -20, 20 * (this.hp / this.maxHp), 3);
+                ctx.restore();
+            }
+        }
+
+        class Player extends Ship {
+            update(rocks, bullets) {
+                let throttle = 0; let turn = 0;
+                if (keys.ArrowUp || keys.w) throttle = 1; if (keys.ArrowDown || keys.s) throttle = -0.5;
+                if (keys.ArrowLeft || keys.a) turn = -1; if (keys.ArrowRight || keys.d) turn = 1;
+                this.applyPhysics(throttle, turn, rocks);
+                if (keys[" "]) this.fire(bullets);
+            }
+        }
+
+        class AIShip extends Ship {
+            update(targets, rocks, bullets) {
+                let target = null; let closestDist = Infinity;
+                for (let t of targets) {
+                    let d = Vec2.dist(this.pos, t.pos);
+                    if (d < closestDist) { closestDist = d; target = t; }
+                }
+                if (!target) return;
+                let diff = Vec2.sub(target.pos, this.pos);
+                let targetAngle = Math.atan2(diff.y, diff.x);
+                let angleErr = Vec2.angleDiff(this.angle, targetAngle);
+                let turn = 0; if (angleErr > 0.1) turn = 1; else if (angleErr < -0.1) turn = -1;
+                let throttle = 0;
+                if (closestDist > 200) throttle = 1.0; else if (closestDist < 100) throttle = -0.5; else throttle = 0.5;
+                this.applyPhysics(throttle, turn, rocks);
+                if (Math.abs(angleErr) < 0.2 && closestDist < 350) this.fire(bullets);
+            }
+        }
+
+        // --- GAME STATE ---
+        let gameState = 'MENU';
+        let player;
+        let allies = [];
+        let enemies = [];
+        let rocks = [];
+        let bullets = [];
+        let healthStations = [];
+        let wakeParticles = [];
+        let explosionParticles = [];
+
+        let wave = 0;
+        let score = 0;
+
+        function spawnExplosion(x, y, color) {
+            for (let i = 0; i < 8; i++) {
+                explosionParticles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 5, vy: (Math.random() - 0.5) * 5, life: 1.0, color: color });
+            }
+        }
+
+        function startGame() {
+            player = new Player(canvas.width / 2, canvas.height / 2, 'blue');
+            rocks = []; bullets = []; enemies = []; healthStations = [];
+            wakeParticles.length = 0; explosionParticles.length = 0; allies = [];
+
+            wave = 0; score = 0;
+
+            for (let i = 0; i < 8; i++) rocks.push(new Rock(Math.random() * canvas.width, Math.random() * canvas.height, 30 + Math.random() * 50));
+            for (let i = 0; i < 2; i++) healthStations.push(new HealthStation(Math.random() * (canvas.width - 100) + 50, Math.random() * (canvas.height - 100) + 50));
+
+            spawnWave();
+
+            gameState = 'PLAYING';
+            startScreen.style.display = 'none';
+            gameOverScreen.style.display = 'none';
+            ui.style.display = 'block';
+            hpUi.style.color = '#2ecc71';
+            modeUi.innerText = `DIFFICULTY: ${currentDiff.name}`;
+        }
+
+        function spawnWave() {
+            wave++;
+            if (wave > 1) score += 500;
+
+            waveUi.innerText = `Wave: ${wave}`;
+            telemetry.innerText = "Enemy Fleet Detected";
+
+            let enemyCount = currentDiff.enemyBase + ((wave - 1) * currentDiff.enemyGrowth);
+            let allyCount = currentDiff.allyBase + ((wave - 1) * currentDiff.allyGrowth);
+
+            for (let i = 0; i < enemyCount; i++) {
+                let ex = Math.random() < 0.5 ? 0 : canvas.width;
+                let ey = Math.random() * canvas.height;
+                enemies.push(new AIShip(ex, ey, 'red'));
+            }
+
+            allies = [];
+            for (let i = 0; i < allyCount; i++) {
+                let ax = player.pos.x + (Math.random() - 0.5) * 300;
+                let ay = player.pos.y + (Math.random() - 0.5) * 300;
+                allies.push(new AIShip(ax, ay, 'blue'));
+            }
+        }
+
+        function endGame() {
+            gameState = 'GAMEOVER';
+            ui.style.display = 'none';
+            gameOverScreen.style.display = 'block';
+            finalScoreDisplay.innerText = `Final Score: ${score}`;
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('boatWarHighScore', highScore);
+                highScoreDisplay.innerText = `High Score: ${highScore}`;
+            }
+        }
+
+        // --- MAIN LOOP ---
+        function loop() {
+            ctx.fillStyle = '#1a4b6e'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            if (gameState === 'MENU') { requestAnimationFrame(loop); return; }
+
+            if (gameState === 'PLAYING') {
+                for (let i = wakeParticles.length - 1; i >= 0; i--) {
+                    const p = wakeParticles[i]; p.life -= p.decay;
+                    if (p.life <= 0) { wakeParticles.splice(i, 1); continue; }
+                    ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.angle);
+                    ctx.fillStyle = `rgba(255, 255, 255, ${p.life * 0.3})`;
+                    ctx.fillRect(-10, -2, 4, 4); ctx.fillRect(-10, 2, 4, 4);
+                    ctx.restore();
+                }
+
+                player.update(rocks, bullets);
+                let blueTeam = [player, ...allies];
+                let redTeam = [...enemies];
+                for (let a of allies) a.update(redTeam, rocks, bullets);
+                for (let e of enemies) e.update(blueTeam, rocks, bullets);
+
+                // --- BULLET LOGIC & ELIMINATION ---
+                for (let i = bullets.length - 1; i >= 0; i--) {
+                    let b = bullets[i]; b.update(); b.draw();
+                    let hit = false;
+                    // Determine POTENTIAL targets, but handle removal manually from GLOBAL arrays
+                    let potentialTargets = b.team === 'blue' ? enemies : blueTeam;
+
+                    for (let j = potentialTargets.length - 1; j >= 0; j--) {
+                        let t = potentialTargets[j];
+                        if (Vec2.dist(b.pos, t.pos) < t.radius + 5) {
+                            t.hp--; hit = true;
+                            spawnExplosion(b.pos.x, b.pos.y, b.team === 'blue' ? '#e74c3c' : '#3498db');
+
+                            // --- DEATH HANDLING ---
+                            if (t.hp <= 0) {
+                                spawnExplosion(t.pos.x, t.pos.y, '#fff');
+
+                                if (t === player) {
+                                    endGame();
+                                } else if (t.team === 'red') {
+                                    // REMOVE ENEMY from GLOBAL array
+                                    const idx = enemies.indexOf(t);
+                                    if (idx > -1) enemies.splice(idx, 1);
+                                    score += 100;
+                                } else if (t.team === 'blue') {
+                                    // REMOVE ALLY from GLOBAL array
+                                    const idx = allies.indexOf(t);
+                                    if (idx > -1) allies.splice(idx, 1);
+                                }
+                            }
+                            break;
+                        }
+                    }
+                    for (let r of rocks) { if (Vec2.dist(b.pos, r.pos) < r.radius) { r.takeDamage(); hit = true; spawnExplosion(b.pos.x, b.pos.y, '#95a5a6'); break; } }
+                    if (b.life <= 0 || hit) bullets.splice(i, 1);
+                }
+
+                for (let i = healthStations.length - 1; i >= 0; i--) {
+                    let h = healthStations[i]; h.draw();
+                    if (Vec2.dist(player.pos, h.pos) < h.radius + player.radius) {
+                        player.hp = Math.min(player.maxHp, player.hp + 5);
+                        healthStations.splice(i, 1); hpUi.style.color = '#2ecc71';
+                        spawnExplosion(player.pos.x, player.pos.y, '#2ecc71');
+                    }
+                }
+
+                for (let i = rocks.length - 1; i >= 0; i--) { if (rocks[i].radius < 15) rocks.splice(i, 1); else rocks[i].draw(); }
+                for (let a of allies) a.draw();
+                for (let e of enemies) e.draw();
+                player.draw();
+
+                for (let i = explosionParticles.length - 1; i >= 0; i--) {
+                    let p = explosionParticles[i]; p.x += p.vx; p.y += p.vy; p.life -= 0.05;
+                    if (p.life <= 0) explosionParticles.splice(i, 1);
+                    else { ctx.globalAlpha = p.life; ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, 4, 4); ctx.globalAlpha = 1.0; }
+                }
+
+                hpUi.innerText = `Hull: ${(player.hp / player.maxHp * 100).toFixed(0)}%`;
+                scoreUi.innerText = `Score: ${score}`;
+                if (player.hp < 4) hpUi.style.color = 'red';
+
+                if (enemies.length === 0) {
+                    spawnWave();
+                    if (Math.random() > 0.6) healthStations.push(new HealthStation(Math.random() * canvas.width, Math.random() * canvas.height));
+                } else {
+                    telemetry.innerText = `Hostiles: ${enemies.length} | Allies: ${allies.length}`;
+                }
+            }
+            requestAnimationFrame(loop);
+        }
+
+        loop();
+    </script>
+</body>
+
+</html>
