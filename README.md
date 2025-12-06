@@ -1,4 +1,6 @@
-# Naval Command: Tactical Boat Simulator
+#<img width="1385" height="796" alt="Screenshot 2025-12-06 131300" src="https://github.com/user-attachments/assets/993a777e-64fa-4241-a336-6c609074f9c3" />
+<img width="1389" height="746" alt="Screenshot 2025-12-06 131313" src="https://github.com/user-attachments/assets/41e4c282-351f-4a32-b132-dd511b62a171" />
+ Naval Command: Tactical Boat Simulator
 
 A physics-based naval combat survival game built entirely in a single HTML5 file using the Canvas API. No external game engines or libraries were used.
 
